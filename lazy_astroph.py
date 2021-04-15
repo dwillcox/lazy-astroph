@@ -21,6 +21,33 @@ try:
 except ImportError:
     from urllib2 import urlopen
 
+ArxivCategoryMap = {"astro-ph": ["GA", "CO", "EP", "HE", "IM", "SR"],
+                    "cond-mat": ["dis-nn", "mes-hall", "mtrl-sci", "other", "quant-gas", "soft", "stat-mech", "str-el", "supr-con"],
+                    "gr-qc": [""],
+                    "hep-ex": [""],
+                    "hep-lat": [""],
+                    "hep-ph": [""],
+                    "hep-th": [""],
+                    "math-ph": [""],
+                    "nlin": ["AO", "CD", "CG", "PS", "SI"],
+                    "nucl-ex": [""],
+                    "nucl-th": [""],
+                    "physics": ["acc-ph", "ao-ph", "app-ph", "atm-clus", "atom-ph", "bio-ph", "chem-ph", "class-ph", "comp-ph", "data-an", "ed-ph", "flu-dyn", "gen-ph", "geo-ph", "hist-ph", "ins-det", "med-ph", "optics", "plasm-ph", "pop-ph", "soc-ph", "space-ph"],
+                    "quant-ph": [""]}
+
+def ArxivCategoryIterator(category):
+    # takes a category and yields each "{category}.{subcategory}" string inside it
+    if not category in ArxivCategoryMap:
+        # this will catch cases where category includes the subcategory, e.g. "astro-ph.GA"
+        yield category
+    else:
+        for subcategory in ArxivCategoryMap[category]:
+            if subcategory:
+                # this will catch cases where the category has multiple subcategories
+                yield "{}.{}".format(category, subcategory)
+            else:
+                # this will catch cases where the category has no subcategories
+                yield category
 
 class Paper:
     """a Paper is a single paper listed on arXiv.  In addition to the
@@ -35,6 +62,12 @@ class Paper:
         self.keywords = list(keywords)
         self.channels = list(set(channels))
         self.posted_to_slack = 0
+
+    def __eq__(self, other):
+        return self.arxiv_id == other.arxiv_id
+
+    def __hash__(self):
+        return hash(self.arxiv_id)
 
     def __str__(self):
         t = " ".join(self.title.split())  # remove extra spaces
@@ -70,10 +103,11 @@ class Keyword:
             self.name, self.matching, self.channel, self.excludes)
 
 
-class AstrophQuery:
-    """ a class to define a query to the arXiv astroph papers """
+class ArxivQuery:
+    """ a class to define a query to arXiv papers """
 
-    def __init__(self, start_date, end_date, max_papers, old_id=None):
+    def __init__(self, start_date, end_date, max_papers, old_id=None,
+                 category="astro-ph"):
         self.start_date = start_date
         self.end_date = end_date
         self.max_papers = max_papers
@@ -83,15 +117,16 @@ class AstrophQuery:
         self.sort_query = "max_results={}&sortBy=submittedDate&sortOrder=descending".format(
             self.max_papers)
 
-        self.subcat = ["GA", "CO", "EP", "HE", "IM", "SR"]
+        self.category = category
+        self.categories = list(ArxivCategoryIterator(self.category))
 
     def get_cat_query(self):
-        """ create the category portion of the astro ph query """
+        """ create the category portion of the arxiv query """
 
         cat_query = "%28"  # open parenthesis
-        for n, s in enumerate(self.subcat):
-            cat_query += "astro-ph.{}".format(s)
-            if n < len(self.subcat)-1:
+        for n, s in enumerate(self.categories):
+            cat_query += s
+            if n < len(self.categories)-1:
                 cat_query += "+OR+"
             else:
                 cat_query += "%29"  # close parenthesis
@@ -154,7 +189,8 @@ class AstrophQuery:
             # so we keep looking through the entire list of returned
             # results.
             if old_id is not None:
-                if arxiv_id < old_id:
+                # strip off any version number at the end, e.g. vN
+                if float(arxiv_id.split("v")[0]) < float(old_id.split("v")[0]):
                     continue
 
             # link
@@ -195,6 +231,8 @@ class AstrophQuery:
                         keys_matched.append(k.name)
                         channels.append(k.channel)
 
+            # multiple channels can list the same keyword, so do not double count them
+            keys_matched = list(set(keys_matched))
             if keys_matched:
                 results.append(Paper(arxiv_id, title, url, keys_matched, channels))
 
@@ -216,30 +254,62 @@ def report(body, subject, sender, receiver):
         sys.exit("ERROR sending mail")
 
 
-def search_astroph(keywords, old_id=None):
-    """ do the actual search though astro-ph by first querying astro-ph
-        for the latest papers and then looking for keyword matches"""
+def search_arxiv(keywords, old_id=None, categories=["astro-ph"]):
+    """ do the actual search though each requested arxiv category by first querying
+        the category for the latest papers and then looking for keyword matches"""
+
+    if "all" in categories:
+        categories = ArxivCategoryMap.keys()
 
     today = dt.date.today()
     day = dt.timedelta(days=1)
 
     max_papers = 1000
 
-    # we pick a wide-enough search range to ensure we catch papers
-    # if there is a holiday
+    cat_papers = []
+    cat_last_id = "0000.00000"
 
-    # also, something wierd happens -- the arxiv ids appear to be
-    # in descending order if you look at the "pastweek" listing
-    # but the submission dates can vary wildly.  It seems that some
-    # papers are held for a week or more before appearing.
-    q = AstrophQuery(today - 10*day, today, max_papers, old_id=old_id)
-    print(q.get_url())
+    for category in categories:
+        # we pick a wide-enough search range to ensure we catch papers
+        # if there is a holiday
 
-    papers, last_id = q.do_query(keywords=keywords, old_id=old_id)
+        # also, something wierd happens -- the arxiv ids appear to be
+        # in descending order if you look at the "pastweek" listing
+        # but the submission dates can vary wildly.  It seems that some
+        # papers are held for a week or more before appearing.
+        q = ArxivQuery(today - 10*day, today, max_papers, old_id=old_id, category=category)
+        print(q.get_url())
 
-    papers.sort(reverse=True)
+        papers, last_id = q.do_query(keywords=keywords, old_id=old_id)
 
-    return papers, last_id
+        cat_papers += papers
+        if float(cat_last_id.split("v")[0]) < float(last_id.split("v")[0]):
+            cat_last_id = last_id
+
+    # a paper can be posted to multiple arxiv categories, so converting
+    # to a set eliminates duplicates and then we sort the papers
+    cat_papers = list(set(cat_papers))
+    cat_papers.sort(reverse=True)
+
+    return cat_papers, cat_last_id
+
+
+def filter_keyword_requires(papers, channel_req=None):
+    # filter out papers that do not match number of required keywords
+    if channel_req is None:
+        return papers
+    else:
+        filtered_papers = []
+        for p in papers:
+            p.posted_to_slack = False
+        for c in channel_req:
+            for p in papers:
+                if not p.posted_to_slack:
+                    if c in p.channels:
+                        if len(p.keywords) >= channel_req[c]:
+                            filtered_papers.append(p)
+                            p.posted_to_slack = 1
+        return filtered_papers
 
 
 def send_email(papers, mail=None):
@@ -325,6 +395,8 @@ def doit():
                         type=str, default=None)
     parser.add_argument("-e", help="slack icon_emoji appearing in post",
                         type=str, default=None)
+    parser.add_argument("-c", "--categories", nargs="+", type=str, default=["astro-ph"],
+            help="list of arxiv categories to search (e.g. 'astro-ph.HE' -- use 'all' to search all arXiv categories. Default: search all astro-ph categories)")
     parser.add_argument("--dry_run",
                         help="don't send any mail or slack posts and don't update the marker where we left off",
                         action="store_true")
@@ -385,9 +457,10 @@ def doit():
         old_id = f.readline().rstrip()
         f.close()
 
-    papers, last_id = search_astroph(keywords, old_id=old_id)
+    papers, last_id = search_arxiv(keywords, old_id=old_id, categories=args.categories)
 
     if not args.dry_run:
+        papers = filter_keyword_requires(papers, channel_req)
         send_email(papers, mail=args.m)
 
         if not args.w is None:
@@ -413,6 +486,7 @@ def doit():
             f.write(last_id)
             f.close()
     else:
+        papers = filter_keyword_requires(papers, channel_req)
         send_email(papers, mail=None)
 
 if __name__ == "__main__":
