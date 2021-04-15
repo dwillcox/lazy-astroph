@@ -1,0 +1,33 @@
+#emu require=2
+neutrinos
+neutrino
+flavor
+flavour
+neutrino oscillation
+flavor transformation
+flavour transformation
+flavor mixing
+flavour mixing
+quantum kinetics
+wavepacket
+density matrix
+collective
+coherence
+
+#quantum require=2
+many body
+quantum
+lattice
+quantum computing
+quantum information
+quantum algorithm
+
+#superfluidity require=2
+superfluid
+condensate
+lattice
+bose-
+einstein
+vortex
+neutron star
+quantum
