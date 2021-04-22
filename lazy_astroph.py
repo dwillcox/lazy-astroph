@@ -319,15 +319,14 @@ def filter_keyword_requires(papers, channel_req=None):
         return papers
     else:
         filtered_papers = []
-        for p in papers:
-            p.posted_to_slack = False
+        passed = [False for p in papers]
         for c in channel_req:
-            for p in papers:
-                if not p.posted_to_slack:
+            for i, p in enumerate(papers):
+                if not passed[i]:
                     if c in p.channels:
                         if len(p.keywords) >= channel_req[c]:
                             filtered_papers.append(p)
-                            p.posted_to_slack = 1
+                            passed[i] = True
         return filtered_papers
 
 
