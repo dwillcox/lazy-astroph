@@ -209,6 +209,7 @@ class ArxivQuery:
             # with the keyword are present, then we reject any match
 
             def get_match(k):
+                # returns bools for [matched?], [excluded?]
                 # first check the "NOT"s
                 excluded = False
                 for n in k.excludes:
@@ -217,26 +218,30 @@ class ArxivQuery:
                         excluded = True
 
                 if excluded:
-                    return True, excluded
+                    return True, True
 
                 if k.matching == "any":
                     if k.name in abstract.lower().replace("\n", " ") or k.name in title.lower():
-                        return True, excluded
+                        return True, False
 
                 elif k.matching == "unique":
                     qa = [l.lower().strip('\":.,!?') for l in abstract.split()]
                     qt = [l.lower().strip('\":.,!?') for l in title.split()]
                     if k.name in qa + qt:
-                        return True, excluded
+                        return True, False
+
+                return False, False
 
             meets_requirements = True
             key_match_results = []
             for k in keywords:
                 match, excluded = get_match(k)
-                if not match and k.required:
+
+                if k.required and not match:
                     meets_requirements = False
                     break
-                elif match and not excluded:
+
+                if match and not excluded:
                     key_match_results.append(k)
 
             keys_matched = []
@@ -414,6 +419,8 @@ def doit():
     parser.add_argument("--dry_run",
                         help="don't send any mail or slack posts and don't update the marker where we left off",
                         action="store_true")
+    parser.add_argument("-l", "--label", type=str, default=None,
+                        help="label for this run of the script (to uniquely identify its param file)")
     args = parser.parse_args()
 
     # get the keywords
@@ -461,6 +468,8 @@ def doit():
                 required = False
                 if "!" in last_two:
                     required = True
+                    kw = kw[:len(kw)-1]
+                    print(f"requiring: {kw}")
 
                 keywords.append(Keyword(kw, matching=matching, required=required,
                                         channel=channel, excludes=excludes))
@@ -468,6 +477,10 @@ def doit():
     # have we done this before? if so, read the .lazy_astroph file to get
     # the id of the paper we left off with
     param_file = os.path.expanduser("~") + "/.lazy_astroph"
+    if args.label:
+        param_file = param_file + f"_{args.label}"
+    print(f"using param file: {param_file}")
+
     try:
         f = open(param_file, "r")
     except:
