@@ -469,7 +469,6 @@ def doit():
                 if "!" in last_two:
                     required = True
                     kw = kw[:len(kw)-1]
-                    print(f"requiring: {kw}")
 
                 keywords.append(Keyword(kw, matching=matching, required=required,
                                         channel=channel, excludes=excludes))
