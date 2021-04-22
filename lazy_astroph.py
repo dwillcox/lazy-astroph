@@ -92,9 +92,10 @@ class Keyword:
        should be done (unique or any), which words, if present, negate
        the match, and what Slack channel this keyword is associated with"""
 
-    def __init__(self, name, matching="any", channel=None, excludes=None):
+    def __init__(self, name, matching="any", required=False, channel=None, excludes=None):
         self.name = name
         self.matching = matching
+        self.required = required
         self.channel = channel
         self.excludes = list(set(excludes))
 
@@ -206,9 +207,8 @@ class ArxivQuery:
             # it has "unique", then we want to make sure only that word matches,
             # i.e., "nova" and not "supernova".  If any of the exclude words associated
             # with the keyword are present, then we reject any match
-            keys_matched = []
-            channels = []
-            for k in keywords:
+
+            def get_match(k):
                 # first check the "NOT"s
                 excluded = False
                 for n in k.excludes:
@@ -217,19 +217,33 @@ class ArxivQuery:
                         excluded = True
 
                 if excluded:
-                    continue
+                    return True, excluded
 
                 if k.matching == "any":
                     if k.name in abstract.lower().replace("\n", " ") or k.name in title.lower():
-                        keys_matched.append(k.name)
-                        channels.append(k.channel)
+                        return True, excluded
 
                 elif k.matching == "unique":
                     qa = [l.lower().strip('\":.,!?') for l in abstract.split()]
                     qt = [l.lower().strip('\":.,!?') for l in title.split()]
                     if k.name in qa + qt:
-                        keys_matched.append(k.name)
-                        channels.append(k.channel)
+                        return True, excluded
+
+            meets_requirements = True
+            key_match_results = []
+            for k in keywords:
+                match, excluded = get_match(k)
+                if not match and k.required:
+                    meets_requirements = False
+                    break
+                elif match and not excluded:
+                    key_match_results.append(k)
+
+            keys_matched = []
+            channels = []
+            for k in key_match_results:
+                keys_matched.append(k.name)
+                channels.append(k.channel)
 
             # multiple channels can list the same keyword, so do not double count them
             keys_matched = list(set(keys_matched))
@@ -437,13 +451,18 @@ def doit():
                     kw = l.strip()
                     excludes = []
 
-                if kw[len(kw)-1] == "-":
+                last_two = kw[-2:]
+                if "-" in last_two:
                     matching = "unique"
                     kw = kw[:len(kw)-1]
                 else:
                     matching = "any"
 
-                keywords.append(Keyword(kw, matching=matching,
+                required = False
+                if "!" in last_two:
+                    required = True
+
+                keywords.append(Keyword(kw, matching=matching, required=required,
                                         channel=channel, excludes=excludes))
 
     # have we done this before? if so, read the .lazy_astroph file to get
